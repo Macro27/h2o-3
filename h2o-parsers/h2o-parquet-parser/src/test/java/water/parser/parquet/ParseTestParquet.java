@@ -1,7 +1,9 @@
 package water.parser.parquet;
 
+import com.google.common.base.Strings;
 import com.google.common.io.Files;
 import com.google.common.io.Resources;
+import com.google.common.primitives.Bytes;
 import org.apache.avro.Schema;
 import org.apache.avro.generic.GenericData;
 import org.apache.avro.generic.GenericRecord;
@@ -14,6 +16,7 @@ import org.apache.parquet.example.data.Group;
 import org.apache.parquet.example.data.simple.SimpleGroupFactory;
 import org.apache.parquet.hadoop.ParquetWriter;
 import org.apache.parquet.hadoop.example.GroupWriteSupport;
+import org.apache.parquet.io.api.Binary;
 import org.apache.parquet.schema.MessageType;
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -25,6 +28,7 @@ import water.fvec.Vec;
 import water.parser.BufferedString;
 import water.parser.ParseDataset;
 import water.parser.ParseSetup;
+import water.util.StringUtils;
 
 import java.io.File;
 import java.io.IOException;
@@ -214,6 +218,35 @@ public class ParseTestParquet extends TestUtil {
   }
 
   @Test
+  public void  testParseLargeStringBlock() {
+    final Date date = new Date();
+    FrameAssertion assertion = new GenFrameAssertion("large.parquet", TestUtil.ari(1, 1)) {
+      @Override
+      protected File prepareFile() throws IOException {
+        return ParquetFileGenerator.generateLargeStringParquet(Files.createTempDir(), file);
+      }
+
+      @Override
+      public Frame prepare() {
+        try {
+          File f = super.generatedFile = prepareFile();
+          System.out.println("File generated into: " + f.getCanonicalPath());
+            return parse_test_file(f.getCanonicalPath(), null, ParseSetup.HAS_HEADER, new byte[]{Vec.T_STR});
+        } catch (IOException e) {
+          throw new RuntimeException("Cannot prepare test frame from file: " + file, e);
+        }
+      }
+
+      @Override
+      public void check(Frame f) {
+        assertArrayEquals("Column names need to match!", ar("string_field"), f.names());
+        assertArrayEquals("Column types need to match!", ar(Vec.T_STR), f.types());
+      }
+    };
+    assertFrameAssertion(assertion);
+  }
+
+  @Test
   public void testParseMultiWithEmpty() {
     final int nFiles = 10;
     FrameAssertion assertion = new GenFrameAssertion("testParseMultiEmpty-$.parquet", TestUtil.ari(5, 90)) {
@@ -346,6 +379,39 @@ class ParquetFileGenerator {
       writer.close();
     }
     return f;
+  }
+
+  static File generateLargeStringParquet(File parentDir, String filename) throws IOException {
+    File f = new File(parentDir, filename);
+
+    Configuration conf = new Configuration();
+    MessageType schema = parseMessageType(
+        "message test { "
+            + "required BINARY string_field; "
+            + "} ");
+    GroupWriteSupport.setSchema(schema, conf);
+    SimpleGroupFactory fact = new SimpleGroupFactory(schema);
+    ParquetWriter<Group> writer = new ParquetWriter<Group>(new Path(f.getPath()), new GroupWriteSupport(),
+        UNCOMPRESSED,
+        262144, 1024, 512, true, false, ParquetProperties.WriterVersion.PARQUET_2_0, conf);
+    try {
+      //This test may fail on Java 9, as it will use 1 byte per char and sometimes 2 bytes
+      Binary binary = Binary.fromString(fillString(Integer.MAX_VALUE / 4, 'c'));
+      writer.write(fact.newGroup()
+            .append("string_field", binary)
+        );
+    } finally {
+      writer.close();
+    }
+    return f;
+  }
+
+  public static String fillString(int count,char c) {
+    StringBuilder sb = new StringBuilder( count );
+    for( int i=0; i<count; i++ ) {
+      sb.append( c );
+    }
+    return sb.toString();
   }
 
   static File generateEmptyWithSchema(File parentDir, String filename) throws IOException {
