@@ -1156,16 +1156,19 @@ def generate_response_glm(weight, x_mat, noise_std, family_type, class_method='p
 
     # generate response given predictor and weight and add noise vector, default behavior
     response_y = x_mat * weight + noise_std * np.random.standard_normal([num_row, 1])
-    lastClass = num_class-1
 
     if 'ordinal' in family_type.lower():    # generate response for ordinal
+        (num_sample, num_class) = response_y.shape
+        discrete_y = np.zeros((num_sample, 1), dtype=np.int)
+        lastClass = num_class-1
         for indR in range(num_sample):
-            temp = lastClass
-            for indC in lastClass:
-                if (response_y[indC,0] >= 0):
-                    temp = indC
+            discrete_y[indR,0] = lastClass
+            for indC in range(lastClass):
+                if (response_y[indR,0] >= 0):
+                    discrete_y[indR,0] = indC
                     break
-            response_y[indC,0]=temp
+        return discrete_y
+
             
     # added more to form Multinomial response
     if ('multinomial' in family_type.lower()) or ('binomial' in family_type.lower()):
